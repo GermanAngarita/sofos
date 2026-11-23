@@ -1,0 +1,28 @@
+[project]
+name = "sofos"
+version = "0.1.0"
+description = "Fotos y mensajes de tu teléfono (iPhone o Android) en una sola interfaz, por cable."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pymobiledevice3>=11",
+    "pillow>=10",
+    "pillow-heif>=0.16",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[project.scripts]
+sofos = "sofos.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["sofos*"]
+
+[tool.setuptools.package-data]
+sofos = ["web/*", "native/*"]

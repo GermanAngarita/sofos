@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sofos</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside id="sidebar">
+    <h1>Sofos</h1>
+    <div class="section-title">Dispositivos <button id="reload" title="Buscar dispositivos">↻</button></div>
+    <ul id="devices"><li class="muted">Buscando…</li></ul>
+    <p class="hint">Conecta tu teléfono por cable y desbloquéalo.</p>
+  </aside>
+
+  <main id="main">
+    <div id="empty" class="empty">Elige un dispositivo a la izquierda.</div>
+
+    <section id="device-view" hidden>
+      <header class="toolbar">
+        <div>
+          <h2 id="device-name"></h2>
+          <span id="device-info" class="muted"></span>
+        </div>
+        <nav id="main-tabs" class="tabs">
+          <button data-tab="photos">Fotos</button>
+          <button data-tab="screen">Pantalla</button>
+          <button data-tab="messages">Mensajes</button>
+        </nav>
+      </header>
+      <div id="status" class="status" hidden></div>
+
+      <div id="tab-photos" class="tab" hidden>
+        <div class="actions photo-bar">
+          <nav id="photo-view" class="tabs">
+            <button data-view="phone" class="active">En el teléfono</button>
+            <button data-view="saved">Guardadas <span id="saved-count"></span></button>
+          </nav>
+          <span id="photo-count" class="muted"></span>
+          <label id="hide-saved-wrap" class="check-label"><input type="checkbox" id="hide-saved"> Ocultar guardadas</label>
+          <span class="push-right" id="sel-info"></span>
+          <button id="sel-all">Seleccionar todo</button>
+          <button id="sel-none" hidden>Quitar selección</button>
+          <button id="transfer" class="primary" disabled>Guardar en la Mac</button>
+          <button id="saved-open" hidden>Abrir carpeta</button>
+          <button id="sync-photos" class="primary" hidden>Copiar todo a la Mac</button>
+        </div>
+        <div id="progress" class="progress" hidden>
+          <div class="bar"><div id="progress-fill"></div></div>
+          <span id="progress-text"></span>
+          <button id="open-result" hidden>Abrir carpeta</button>
+        </div>
+        <p id="photo-hint" class="hint-line muted">Clic para elegir · Shift+clic elige un rango · doble clic para ver en grande · ✓ = ya está en sofos/descargas</p>
+        <div id="gallery"></div>
+      </div>
+
+      <div id="tab-screen" class="tab" hidden>
+        <div class="actions">
+          <nav id="screen-mode" class="tabs">
+            <button data-mode="live" class="active">En vivo</button>
+            <button data-mode="captures">Capturas <span id="captures-count"></span></button>
+          </nav>
+          <span id="screen-status" class="muted"></span>
+          <div class="push-right live-only zoom">
+            <button id="zoom-out" title="Alejar (⌘−)">−</button>
+            <button id="zoom-fit" title="Ajustar a la ventana (⌘0)">Ajustar</button>
+            <button id="zoom-in" title="Acercar (⌘+)">+</button>
+          </div>
+          <button id="screen-resume" class="live-only primary" hidden>Reanudar</button>
+          <button id="screen-capture" class="live-only" disabled>Guardar captura</button>
+          <button id="screen-stop" class="live-only" hidden>Detener</button>
+          <button id="screen-full" class="live-only">Pantalla completa</button>
+          <button id="captures-open" class="push-right captures-only" hidden>Abrir carpeta</button>
+        </div>
+        <div id="screen-wrap" class="screen-wrap fit">
+          <div id="screen-start" class="screen-start">
+            <button id="screen-start-btn" class="primary">Ver pantalla del iPhone</button>
+            <p class="muted">Si el iPhone empieza a reproducir sonido, Sofos pausa la pantalla para que el sonido
+              siga saliendo por el iPhone (mientras se ve la pantalla, iOS lo envía a la Mac).
+              La primera vez, macOS pide permiso de micrófono para poder detectarlo.</p>
+          </div>
+          <img id="screen-img" alt="Pantalla del iPhone" hidden>
+        </div>
+        <div id="captures" class="captures" hidden></div>
+      </div>
+
+      <div id="tab-messages" class="tab" hidden>
+        <div class="messages-layout">
+          <div class="conv-pane">
+            <div class="actions">
+              <button id="refresh-messages" class="primary">Actualizar mensajes</button>
+            </div>
+            <input id="conv-search" type="search" placeholder="Buscar conversación…">
+            <ul id="conversations"></ul>
+          </div>
+          <div class="thread-pane">
+            <div id="thread-title" class="thread-title muted">Elige una conversación</div>
+            <div id="thread" class="thread"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="viewer" class="viewer" hidden>
+    <button id="viewer-close" aria-label="Cerrar">✕</button>
+    <a id="viewer-download" class="viewer-download" hidden>Guardar en la Mac</a>
+    <div id="viewer-name" class="viewer-name"></div>
+    <div id="viewer-content"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
