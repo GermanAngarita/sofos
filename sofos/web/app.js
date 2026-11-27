@@ -129,6 +129,8 @@ function selectDevice(key) {
     li.classList.toggle("active", state.devices[i]?.key === key));
   showStatus(d.status !== "ok" ? d.status : "", false);
   state.convId = null;
+  state.fs.root = "media";
+  state.fs.path = "/";
   applyTabs();
   if (d.job?.running) watchJob();
 }
@@ -141,6 +143,7 @@ function switchTab(tab) {
   // La Mac lee Mensajes directo: no hay nada que "actualizar".
   $("#refresh-messages").hidden = state.current.kind === "mac";
   if (tab === "photos") loadPhotos();
+  else if (tab === "files") startFiles();
   else if (tab === "screen") startScreen();
   else loadConversations();
 }
@@ -378,6 +381,196 @@ function openViewer(p) {
   dl.hidden = !canBrowse();
   dl.href = `${src}&download=1`;
   $("#viewer").hidden = false;
+}
+
+// ---------- Explorador de archivos (sólo lectura) ----------
+
+state.fs = { roots: [], root: "media", path: "/", entries: [], selected: null };
+const BIG_FILE = 50 * 1e6; // más que esto: preguntar antes de traerlo para la vista previa
+const fsQuery = (extra) => new URLSearchParams({ root: state.fs.root, ...extra }).toString();
+const fileIcon = (e) => {
+  if (e.is_dir) return "📁";
+  const ext = e.name.split(".").pop().toLowerCase();
+  if (["jpg", "jpeg", "png", "heic", "gif", "webp"].includes(ext)) return "🖼️";
+  if (["mov", "mp4", "m4v"].includes(ext)) return "🎞️";
+  if (["mp3", "m4a", "wav", "aac", "opus", "ogg", "caf", "amr"].includes(ext)) return "🎵";
+  if (["sqlite", "sqlitedb", "db", "storedata", "cloudphotodb"].includes(ext)) return "🗄️";
+  if (["plist", "json", "xml", "txt", "log"].includes(ext)) return "📄";
+  if (ext === "pdf") return "📕";
+  return "▫️";
+};
+
+async function startFiles() {
+  const key = state.current.key;
+  const list = $("#fs-roots");
+  list.replaceChildren(el("li", "muted", "Cargando…"));
+  try {
+    state.fs.roots = await getJSON(api(key, "/fs/roots"));
+  } catch (e) {
+    list.replaceChildren(el("li", "muted", e.message));
+    return;
+  }
+  if (state.current?.key !== key) return;
+  if (!state.fs.roots.some((r) => r.id === state.fs.root)) state.fs.root = "media";
+  renderRoots();
+  openFolder(state.fs.path || "/");
+}
+
+function renderRoots() {
+  const list = $("#fs-roots");
+  list.replaceChildren();
+  for (const r of state.fs.roots) {
+    const li = el("li", r.id === state.fs.root ? "active" : "", (r.kind === "media" ? "📱 " : "📦 ") + r.name);
+    li.title = r.bundle_id || "DCIM, PhotoData, Books, Music…";
+    li.onclick = () => { state.fs.root = r.id; renderRoots(); openFolder("/"); };
+    list.append(li);
+  }
+}
+
+async function openFolder(path) {
+  const key = state.current.key, root = state.fs.root;
+  $("#fs-preview").hidden = true;
+  $("#fs-info").textContent = "Cargando…";
+  $("#fs-table tbody").replaceChildren();
+  let data;
+  try {
+    data = await getJSON(api(key, `/fs/list?${fsQuery({ path })}`));
+  } catch (e) {
+    $("#fs-info").textContent = e.message;
+    return;
+  }
+  if (state.current?.key !== key || state.fs.root !== root) return;
+  state.fs.path = data.path;
+  state.fs.entries = data.entries;
+  renderCrumbs();
+  const dirs = data.entries.filter((e) => e.is_dir).length;
+  const files = data.entries.length - dirs;
+  const bytes = data.entries.reduce((s, e) => s + (e.is_dir ? 0 : e.size), 0);
+  $("#fs-info").textContent = `${dirs} carpetas · ${files} archivos` + (files ? ` · ${fmtSize(bytes)}` : "");
+  const body = $("#fs-table tbody");
+  for (const e of data.entries) {
+    const tr = el("tr");
+    tr.append(el("td", null, `${fileIcon(e)} ${e.name}`),
+      el("td", "num", e.is_dir ? "" : fmtSize(e.size)),
+      el("td", null, e.date ? new Date(e.date * 1000).toLocaleString() : ""));
+    tr.title = e.path;
+    tr.onclick = () => (e.is_dir ? openFolder(e.path) : selectFile(e, tr));
+    body.append(tr);
+  }
+}
+
+function fmtSize(b) {
+  if (b < 1024) return `${b} B`;
+  if (b < 1e6) return `${(b / 1024).toFixed(0)} KB`;
+  if (b < 1e9) return `${(b / 1e6).toFixed(1)} MB`;
+  return `${(b / 1e9).toFixed(2)} GB`;
+}
+
+function renderCrumbs() {
+  const nav = $("#fs-crumbs");
+  nav.replaceChildren();
+  const rootInfo = state.fs.roots.find((r) => r.id === state.fs.root);
+  const base = state.fs.root === "media" ? "/" : "/Documents";
+  const crumb = (label, path) => {
+    const b = el("button", null, label);
+    b.onclick = () => openFolder(path);
+    return b;
+  };
+  nav.append(crumb(rootInfo?.name || "Inicio", base));
+  const rest = state.fs.path.slice(base.length).split("/").filter(Boolean);
+  let acc = base.replace(/\/$/, "");
+  for (const part of rest) {
+    acc += "/" + part;
+    nav.append(el("span", null, "›"), crumb(part, acc));
+  }
+}
+
+function selectFile(e, row) {
+  document.querySelectorAll("#fs-table tbody tr").forEach((r) => r.classList.toggle("active", r === row));
+  state.fs.selected = e;
+  const pv = $("#fs-preview");
+  pv.hidden = false;
+  $("#fs-pv-name").textContent = e.name;
+  $("#fs-pv-meta").textContent = [fmtSize(e.size), e.date && new Date(e.date * 1000).toLocaleString(), e.path]
+    .filter(Boolean).join(" · ");
+  $("#fs-pv-download").href = api(state.current.key, `/fs/file?${fsQuery({ path: e.path, download: 1 })}`);
+  const body = $("#fs-pv-body");
+  body.replaceChildren();
+  if (e.size > BIG_FILE) {
+    const btn = el("button", "primary", `Traer y ver (${fmtSize(e.size)})`);
+    btn.onclick = () => loadPreview(e);
+    body.append(el("p", "muted", "Archivo grande: traerlo del iPhone puede tardar."), btn);
+  } else {
+    loadPreview(e);
+  }
+}
+
+async function loadPreview(e) {
+  const key = state.current.key;
+  const body = $("#fs-pv-body");
+  body.replaceChildren(el("p", "muted", "Trayendo del iPhone…"));
+  let pv;
+  try {
+    pv = await getJSON(api(key, `/fs/preview?${fsQuery({ path: e.path, size: e.size })}`));
+  } catch (err) {
+    body.replaceChildren(el("p", "muted", err.message));
+    return;
+  }
+  if (state.fs.selected !== e) return;
+  const src = api(key, `/fs/file?${fsQuery({ path: e.path })}`);
+  body.replaceChildren();
+  if (pv.kind === "image") { const i = el("img"); i.src = src; body.append(i); }
+  else if (pv.kind === "video") { const v = el("video"); v.src = src; v.controls = true; body.append(v); }
+  else if (pv.kind === "audio") { const a = el("audio"); a.src = src; a.controls = true; body.append(a); }
+  else if (pv.kind === "pdf") { const f = el("iframe"); f.src = src; body.append(f); }
+  else if (pv.kind === "sqlite") renderSqlite(e, pv.tables);
+  else if (pv.kind === "too_big") body.append(el("p", "muted", "Demasiado grande para la vista previa. Usa «Descargar»."));
+  else {
+    if (pv.kind === "binary") body.append(el("p", "muted", "Archivo binario: primeros 1024 bytes."));
+    body.append(el("pre", null, pv.text || ""));
+    if (pv.truncated) body.append(el("p", "muted", "(mostrando sólo el comienzo)"));
+  }
+}
+
+function renderSqlite(e, tables) {
+  const body = $("#fs-pv-body");
+  body.replaceChildren(el("p", "muted", `Base de datos SQLite · ${tables.length} tablas. Clic en una para ver filas.`));
+  const ul = el("ul", "tbl-list");
+  for (const t of [...tables].sort((a, b) => (b.rows || 0) - (a.rows || 0))) {
+    const li = el("li");
+    const left = el("div");
+    left.append(el("strong", null, t.name), el("div", "cols", t.columns.join(", ")));
+    li.append(left, el("span", "muted", t.rows === null ? "?" : `${t.rows.toLocaleString()} filas`));
+    li.onclick = () => showTable(e, t, tables);
+    ul.append(li);
+  }
+  body.append(ul);
+}
+
+async function showTable(e, t, tables) {
+  const body = $("#fs-pv-body");
+  const back = el("button", null, "‹ Tablas");
+  back.onclick = () => renderSqlite(e, tables);
+  body.replaceChildren(back, el("p", "muted", `Cargando ${t.name}…`));
+  let data;
+  try {
+    data = await getJSON(api(state.current.key, `/fs/sqlite?${fsQuery({ path: e.path, table: t.name, limit: 200 })}`));
+  } catch (err) {
+    body.replaceChildren(back, el("p", "muted", err.message));
+    return;
+  }
+  const table = el("table", "data-grid");
+  const head = el("tr");
+  data.columns.forEach((c) => head.append(el("th", null, c)));
+  table.append(head);
+  for (const row of data.rows) {
+    const tr = el("tr");
+    row.forEach((v) => { const td = el("td", null, v === null ? "∅" : String(v)); td.title = td.textContent; tr.append(td); });
+    table.append(tr);
+  }
+  const wrap = el("div", "grid-wrap");
+  wrap.append(table);
+  body.replaceChildren(back, el("p", "muted", `${t.name}: primeras ${data.rows.length} de ${t.rows?.toLocaleString() ?? "?"} filas`), wrap);
 }
 
 // ---------- Pantalla en vivo ----------

@@ -62,7 +62,8 @@ def test_wifi_only_has_no_screen(adapter, monkeypatch):
     with_mux(monkeypatch, [mux("A", "Network")])
     [d] = asyncio.run(adapter.list_devices())
     assert d.connection == "wifi" and adapter.opened == ["Network"]
-    assert d.capabilities == ["browse", "messages"] and d.wifi_enabled is True
+    assert "screen" not in d.capabilities and d.wifi_enabled is True
+    assert {"browse", "files", "messages"} <= set(d.capabilities)
 
 
 def test_enable_wifi_needs_cable(adapter, monkeypatch):
@@ -72,3 +73,20 @@ def test_enable_wifi_needs_cable(adapter, monkeypatch):
     with_mux(monkeypatch, [mux("A", "USB")])
     asyncio.run(adapter.set_wifi("A", True))
     assert adapter.lockdown.set_calls == [True]
+
+
+@pytest.mark.parametrize("root,path,expected", [
+    ("media", "/DCIM/100APPLE", "/DCIM/100APPLE"),
+    ("media", "../../etc", "/etc"),  # AFC ya está encerrado en la zona de medios
+    ("app:com.x", "/", "/Documents"),
+    ("app:com.x", "/Documents/sub", "/Documents/sub"),
+    ("app:com.x", "sub/file.txt", "/Documents/sub/file.txt"),
+])
+def test_fs_path_normalizes(root, path, expected):
+    assert ios.IOSAdapter._fs_path(root, path) == expected
+
+
+@pytest.mark.parametrize("path", ["/Documents/../Library", "../Library/Preferences", "/Documents/../../x"])
+def test_fs_path_cannot_leave_app_documents(path):
+    with pytest.raises(FileNotFoundError):
+        ios.IOSAdapter._fs_path("app:com.x", path)

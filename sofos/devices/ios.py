@@ -11,6 +11,7 @@ Si está por las dos vías, se usa el cable.
 
 import asyncio
 import plistlib
+import posixpath
 import re
 import time
 from pathlib import Path
@@ -26,6 +27,8 @@ from pymobiledevice3.exceptions import (
 )
 from pymobiledevice3.lockdown import create_using_usbmux
 from pymobiledevice3.services.afc import AfcService
+from pymobiledevice3.services.house_arrest import HouseArrestService
+from pymobiledevice3.services.installation_proxy import InstallationProxyService
 from pymobiledevice3.services.mobilebackup2 import (
     BACKUP_SELECTIONS,
     BackupSelection,
@@ -74,8 +77,10 @@ class IOSAdapter(DeviceAdapter):
     def __init__(self) -> None:
         self._locks: dict[str, asyncio.Lock] = {}
         # Sesión AFC abierta por dispositivo para navegar fotos sin reconectar en cada miniatura.
-        self._afc: dict[str, tuple] = {}
-        self._afc_locks: dict[str, asyncio.Lock] = {}
+        # Sesiones AFC abiertas por (dispositivo, raíz) para no reconectar en cada pedido.
+        self._afc: dict[tuple[str, str], tuple] = {}
+        self._afc_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._apps: dict[str, tuple[float, list[dict]]] = {}
         self._listing: dict[str, tuple[float, list[dict]]] = {}
 
     def _lock(self, udid: str) -> asyncio.Lock:
@@ -134,9 +139,10 @@ class IOSAdapter(DeviceAdapter):
                 device.wifi_enabled = (
                     True if connection_type == "Network" else await lockdown.get_enable_wifi_connections())
                 # La pantalla sólo se puede ver por cable (macOS no la recibe por Wi-Fi).
-                device.capabilities = ["browse", "messages"] + (["screen"] if connection_type == "USB" else [])
+                device.capabilities = ["browse", "files", "messages"] + (
+                    ["screen"] if connection_type == "USB" else [])
             except PyMobileDevice3Exception:
-                device.capabilities = device.capabilities or ["browse", "messages"]
+                device.capabilities = device.capabilities or ["browse", "files", "messages"]
             finally:
                 await lockdown.close()
             devices.append(device)
@@ -155,8 +161,8 @@ class IOSAdapter(DeviceAdapter):
 
     # ---------- Fotos (se ven directo del teléfono; sólo se copian las que elijas) ----------
 
-    async def _close_afc(self, udid: str) -> None:
-        session = self._afc.pop(udid, None)
+    async def _close_afc(self, udid: str, root: str = "media") -> None:
+        session = self._afc.pop((udid, root), None)
         if session:
             afc, lockdown = session
             for closer in (afc.aclose, lockdown.close):
@@ -165,27 +171,43 @@ class IOSAdapter(DeviceAdapter):
                 except Exception:  # noqa: BLE001 — la conexión ya puede estar muerta
                     pass
 
-    async def _with_afc(self, udid: str, fn):
-        """Ejecuta `fn(afc)` sobre una sesión AFC compartida; reconecta una vez si se cayó."""
-        async with self._afc_locks.setdefault(udid, asyncio.Lock()):
+    async def _open_fs(self, udid: str, root: str):
+        """Sesión AFC: "media" = zona de medios; "app:<bundle id>" = Documents de esa app."""
+        lockdown = await self._lockdown(udid)
+        try:
+            if root == "media":
+                svc = AfcService(lockdown)
+            elif root.startswith("app:"):
+                # Sólo apps que comparten archivos (UIFileSharingEnabled); el resto lo rechaza iOS.
+                svc = await HouseArrestService.create(lockdown, root[4:], documents_only=True)
+            else:
+                raise FileNotFoundError(root)
+            return await svc.__aenter__(), lockdown
+        except BaseException:
+            await lockdown.close()
+            raise
+
+    async def _with_fs(self, udid: str, root: str, fn):
+        """Ejecuta `fn(afc)` sobre una sesión compartida de esa raíz; reconecta una vez si se cayó."""
+        async with self._afc_locks.setdefault((udid, root), asyncio.Lock()):
             for attempt in (1, 2):
-                if udid not in self._afc:
-                    lockdown = await self._lockdown(udid)
+                if (udid, root) not in self._afc:
                     try:
-                        afc = await AfcService(lockdown).__aenter__()
-                    except BaseException:
-                        await lockdown.close()
-                        raise
-                    self._afc[udid] = (afc, lockdown)
-                afc = self._afc[udid][0]
+                        self._afc[(udid, root)] = await self._open_fs(udid, root)
+                    except PyMobileDevice3Exception as exc:
+                        raise DeviceError(f"El iPhone no dejó abrir esa carpeta: {exc}") from exc
+                afc = self._afc[(udid, root)][0]
                 try:
                     return await fn(afc)
                 except AfcException as exc:  # el archivo no existe, etc.: no es problema de conexión
                     raise FileNotFoundError(str(exc)) from exc
                 except (PyMobileDevice3Exception, OSError, ConnectionError) as exc:
-                    await self._close_afc(udid)
+                    await self._close_afc(udid, root)
                     if attempt == 2:
                         raise DeviceError(f"Se perdió la conexión con el iPhone: {exc}") from exc
+
+    async def _with_afc(self, udid: str, fn):
+        return await self._with_fs(udid, "media", fn)
 
     @staticmethod
     def _check_path(path: str) -> str:
@@ -294,6 +316,95 @@ class IOSAdapter(DeviceAdapter):
         finally:
             await lockdown.close()
         return len(plan)
+
+
+    # ---------- Explorador de archivos (sólo lectura) ----------
+
+    async def fs_roots(self, device_id: str) -> list[dict]:
+        """Lugares que se pueden explorar: la zona de medios y las apps que comparten archivos."""
+        cached = self._apps.get(device_id)
+        if not cached or time.time() - cached[0] > 120:
+            lockdown = await self._lockdown(device_id)
+            try:
+                async with InstallationProxyService(lockdown) as ip:
+                    apps = await ip.get_apps(application_type="User")
+            except PyMobileDevice3Exception as exc:
+                raise DeviceError(f"No pude listar las apps: {exc}") from exc
+            finally:
+                await lockdown.close()
+            sharing = [
+                {"id": f"app:{bid}", "name": a.get("CFBundleDisplayName") or a.get("CFBundleName") or bid,
+                 "kind": "app", "bundle_id": bid}
+                for bid, a in apps.items() if a.get("UIFileSharingEnabled")
+            ]
+            sharing.sort(key=lambda r: r["name"].lower())
+            self._apps[device_id] = (time.time(), sharing)
+            cached = self._apps[device_id]
+        return [{"id": "media", "name": "Medios del iPhone", "kind": "media"}] + cached[1]
+
+    @staticmethod
+    def _fs_path(root: str, path: str) -> str:
+        """Ruta absoluta normalizada dentro de la raíz (sin ../)."""
+        base = "/Documents" if root.startswith("app:") else "/"
+        if path in ("", "/"):  # «inicio» de esa raíz
+            path = base
+        norm = posixpath.normpath(path if path.startswith("/") else posixpath.join(base, path))
+        if not (norm == base or norm.startswith(base.rstrip("/") + "/")):
+            raise FileNotFoundError(path)
+        return norm
+
+    async def fs_list(self, device_id: str, root: str, path: str) -> dict:
+        target = self._fs_path(root, path)
+
+        async def listing(afc):
+            names = [n for n in await afc.listdir(target) if n not in (".", "..")]
+
+            async def info(name):
+                full = posixpath.join(target, name)
+                try:
+                    st = await afc.stat(full)
+                except AfcException:
+                    return None
+                when = st.get("st_mtime")
+                return {"name": name, "path": full, "is_dir": st.get("st_ifmt") == "S_IFDIR",
+                        "size": st.get("st_size", 0), "date": when.timestamp() if when else None}
+
+            entries = [e for e in await asyncio.gather(*(info(n) for n in names)) if e]
+            entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
+            return entries
+
+        return {"root": root, "path": target, "entries": await self._with_fs(device_id, root, listing)}
+
+    async def fs_open(self, device_id: str, root: str, path: str, with_sidecars: bool = False) -> Path:
+        """Trae ese archivo a un caché temporal y devuelve la ruta local.
+
+        `with_sidecars`: para SQLite, trae también -wal y -shm (si no, faltan los datos recientes).
+        """
+        target = self._fs_path(root, path)
+        safe_root = root.replace(":", "_").replace("/", "_")
+        local = VIEW_CACHE_DIR / device_id / "fs" / safe_root / target.lstrip("/")
+
+        async def pull(afc):
+            stat = await afc.stat(target)
+            if stat.get("st_ifmt") == "S_IFDIR":
+                raise FileNotFoundError(path)
+            names = [target] + ([target + "-wal", target + "-shm"] if with_sidecars else [])
+            for remote in names:
+                dest = local.with_name(posixpath.basename(remote))
+                try:
+                    st = stat if remote == target else await afc.stat(remote)
+                except AfcException:
+                    dest.unlink(missing_ok=True)  # no existe ese -wal/-shm
+                    continue
+                if dest.exists() and dest.stat().st_size == st.get("st_size"):
+                    continue  # ya está en caché
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                tmp = dest.with_name(dest.name + ".part")
+                await afc.pull(remote, str(tmp), progress_bar=False)
+                tmp.rename(dest)
+
+        await self._with_fs(device_id, root, pull)
+        return local
 
     # ---------- Mensajes ----------
 

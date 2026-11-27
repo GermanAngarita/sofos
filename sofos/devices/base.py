@@ -36,6 +36,16 @@ class DeviceAdapter(ABC):
         """Copia cada foto (ruta en el teléfono → archivo local). Llama on_progress(bytes) por cada una."""
         raise DeviceError("Esta fuente no permite elegir fotos para copiar.")
 
+    async def fs_roots(self, device_id: str) -> list[dict]:
+        """Lugares explorables del teléfono (sólo lectura)."""
+        raise DeviceError("Esta fuente no permite explorar archivos.")
+
+    async def fs_list(self, device_id: str, root: str, path: str) -> dict:
+        raise DeviceError("Esta fuente no permite explorar archivos.")
+
+    async def fs_open(self, device_id: str, root: str, path: str, with_sidecars: bool = False) -> Path:
+        raise DeviceError("Esta fuente no permite explorar archivos.")
+
     async def set_wifi(self, device_id: str, on: bool) -> None:
         """Permite (o no) que esta Mac se conecte al teléfono por Wi-Fi."""
         raise DeviceError("Esta fuente no admite conexión por Wi-Fi.")

@@ -10,7 +10,7 @@ from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from sofos import photos, saved
+from sofos import explore, photos, saved
 from sofos.config import CAPTURES_DIR
 
 CAPTURE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
@@ -148,6 +148,57 @@ def create_app(manager: DeviceManager | None = None) -> FastAPI:
         saved.root().mkdir(parents=True, exist_ok=True)
         subprocess.run(["open", str(saved.root())], check=False)
         return {"ok": True}
+
+    # ---------- Explorador de archivos del teléfono (sólo lectura) ----------
+
+    @app.get("/api/devices/{key}/fs/roots")
+    async def fs_roots(key: str):
+        adapter, device_id = mgr.resolve(key)
+        return await adapter.fs_roots(device_id)
+
+    @app.get("/api/devices/{key}/fs/list")
+    async def fs_list(key: str, root: str = "media", path: str = "/"):
+        adapter, device_id = mgr.resolve(key)
+        try:
+            return await adapter.fs_list(device_id, root, path)
+        except FileNotFoundError:
+            raise HTTPException(404, "Esa carpeta no existe o no se puede abrir.")
+
+    async def _fs_local(key: str, root: str, path: str, sidecars: bool = False) -> Path:
+        adapter, device_id = mgr.resolve(key)
+        try:
+            return await adapter.fs_open(device_id, root, path, with_sidecars=sidecars)
+        except FileNotFoundError:
+            raise HTTPException(404, "Archivo no encontrado.")
+
+    @app.get("/api/devices/{key}/fs/preview")
+    async def fs_preview(key: str, path: str, root: str = "media", size: int = 0):
+        if size > explore.PREVIEW_LIMIT:
+            return {"kind": "too_big"}
+        is_db = explore.kind_for(path) == "sqlite"
+        local = await _fs_local(key, root, path, sidecars=is_db)
+        try:
+            return await asyncio.to_thread(explore.preview, local)
+        except Exception as exc:  # noqa: BLE001 — archivo raro o dañado: lo decimos y ya
+            return {"kind": "error", "text": f"No pude leer este archivo: {exc}"}
+
+    @app.get("/api/devices/{key}/fs/sqlite")
+    async def fs_sqlite(key: str, path: str, table: str, root: str = "media",
+                        limit: int = Query(100, le=1000), offset: int = 0):
+        local = await _fs_local(key, root, path, sidecars=True)
+        try:
+            return await asyncio.to_thread(explore.sqlite_rows, local, table, limit, offset)
+        except KeyError:
+            raise HTTPException(404, "Esa tabla no existe.")
+
+    @app.get("/api/devices/{key}/fs/file")
+    async def fs_file(key: str, path: str, root: str = "media", download: bool = False):
+        local = await _fs_local(key, root, path)
+        if download:
+            return FileResponse(local, filename=local.name)
+        if explore.kind_for(local.name) == "image":
+            return FileResponse(await asyncio.to_thread(photos.viewable, local))  # HEIC → JPEG
+        return FileResponse(local)
 
     # ---------- Pantalla en vivo (sólo iPhone) ----------
 

@@ -60,6 +60,9 @@ Lo que se copia del teléfono se guarda en `~/.sofos/` (puedes cambiarlo con `SO
   Finder, sin tocar el iPhone). Después, en la misma red, aparece como **📶 Wi-Fi** sin cable: fotos y
   mensajes funcionan; la pantalla sólo por cable. Si el iPhone lleva rato bloqueado puede tardar en
   aparecer (iOS deja de anunciarse); desbloquéalo o ponlo a cargar.
+- **Archivos:** explorador de sólo lectura de lo que el iPhone deja ver sin permisos extra (zona de
+  medios y apps que comparten archivos, p. ej. Chrome o VLC), con vista previa de imágenes, video,
+  audio, PDF, texto, plist y bases SQLite (tablas y filas).
 - **Velocidad:** el límite es el cable. Con el cable USB-C que trae el iPhone (USB 2.0) son ~40 MB/s;
   con un cable USB 3 (10 Gb/s) en un iPhone Pro puede ser varias veces más rápido.
 - **iCloud:** se ven las fotos tomadas con el iPhone y las que iCloud ya bajó al teléfono. Las que sólo
@@ -93,6 +96,7 @@ sofos/
   manager.py           # une las fuentes; tareas en segundo plano (copiar fotos/respaldos)
   photos.py            # miniaturas y HEIC→JPEG
   saved.py             # descargas/Fotos: qué hay y qué del teléfono ya está guardado
+  explore.py           # vista previa del explorador (texto, plist, SQLite, binario)
   screen.py            # pantalla del iPhone en vivo (lanza native/screen.swift)
   devices/
     base.py            # interfaz DeviceAdapter (agregar una fuente = implementar esto)

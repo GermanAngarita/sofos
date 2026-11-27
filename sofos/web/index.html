@@ -26,6 +26,7 @@
         <button id="wifi-toggle" class="wifi-toggle" hidden></button>
         <nav id="main-tabs" class="tabs">
           <button data-tab="photos">Fotos</button>
+          <button data-tab="files">Archivos</button>
           <button data-tab="screen">Pantalla</button>
           <button data-tab="messages">Mensajes</button>
         </nav>
@@ -54,6 +55,32 @@
         </div>
         <p id="photo-hint" class="hint-line muted">Clic para elegir · Shift+clic elige un rango · doble clic para ver en grande · ✓ = ya está en sofos/descargas</p>
         <div id="gallery"></div>
+      </div>
+
+      <div id="tab-files" class="tab" hidden>
+        <div class="fs-layout">
+          <aside class="fs-roots">
+            <div class="section-title">Lugares</div>
+            <ul id="fs-roots"></ul>
+            <p class="hint">Sólo lectura. Es todo lo que el iPhone deja ver sin permisos extra:
+              la zona de medios y las apps que comparten sus archivos.</p>
+          </aside>
+          <section class="fs-main">
+            <nav id="fs-crumbs" class="fs-crumbs"></nav>
+            <div id="fs-info" class="muted fs-info"></div>
+            <div class="fs-table-wrap"><table id="fs-table" class="fs-table">
+              <thead><tr><th>Nombre</th><th class="num">Tamaño</th><th>Modificado</th></tr></thead>
+              <tbody></tbody>
+            </table></div>
+          </section>
+          <section id="fs-preview" class="fs-preview" hidden>
+            <header>
+              <div><strong id="fs-pv-name"></strong><div id="fs-pv-meta" class="muted"></div></div>
+              <a id="fs-pv-download" class="button">Descargar</a>
+            </header>
+            <div id="fs-pv-body" class="fs-pv-body"></div>
+          </section>
+        </div>
       </div>
 
       <div id="tab-screen" class="tab" hidden>
