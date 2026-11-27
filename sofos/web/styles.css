@@ -133,3 +133,9 @@ button:disabled { opacity: .5; cursor: default; }
                 gap: 12px; align-items: center; }
 .screen-start button { font-size: 15px; padding: 10px 20px; }
 .screen-start p { font-size: 13px; line-height: 1.45; margin: 0; }
+
+.wifi-toggle { margin-left: auto; margin-right: 12px; font-size: 13px; }
+.wifi-toggle.on { color: #1f9d55; border-color: #1f9d5566; }
+.conn { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: var(--bg); color: var(--muted);
+        margin-left: 6px; border: 1px solid var(--border); }
+#devices li.active .conn { background: #ffffff33; color: #fff; border-color: #ffffff55; }

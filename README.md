@@ -56,6 +56,10 @@ Lo que se copia del teléfono se guarda en `~/.sofos/` (puedes cambiarlo con `SO
    tienes en la Mac.
 4. **Mensajes → Actualizar mensajes**.
 
+- **Wi-Fi:** con el iPhone por cable, toca **📶 Usar también por Wi-Fi** (lo mismo que la casilla de
+  Finder, sin tocar el iPhone). Después, en la misma red, aparece como **📶 Wi-Fi** sin cable: fotos y
+  mensajes funcionan; la pantalla sólo por cable. Si el iPhone lleva rato bloqueado puede tardar en
+  aparecer (iOS deja de anunciarse); desbloquéalo o ponlo a cargar.
 - **Velocidad:** el límite es el cable. Con el cable USB-C que trae el iPhone (USB 2.0) son ~40 MB/s;
   con un cable USB 3 (10 Gb/s) en un iPhone Pro puede ser varias veces más rápido.
 - **iCloud:** se ven las fotos tomadas con el iPhone y las que iCloud ya bajó al teléfono. Las que sólo

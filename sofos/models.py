@@ -15,6 +15,10 @@ class Device:
     capabilities: list[str] = field(default_factory=list)
     # Estado legible si algo falta (ej. "Desbloquea el teléfono y toca Confiar").
     status: str = "ok"
+    # Cómo está conectado ahora: "usb" | "wifi" (vacío si no aplica, p. ej. la Mac).
+    connection: str = ""
+    # Si el teléfono acepta conexiones por Wi-Fi desde esta Mac (None = no se sabe / no aplica).
+    wifi_enabled: bool | None = None
 
 
 @dataclass

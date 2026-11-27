@@ -1,7 +1,12 @@
-"""iPhone/iPad por USB usando pymobiledevice3.
+"""iPhone/iPad por USB o Wi-Fi usando pymobiledevice3.
 
-Emparejamiento: la primera vez el iPhone muestra "¿Confiar en esta computadora?"
-y pide el código de desbloqueo. Después de eso no se pide nada más.
+Emparejamiento: la primera vez (por cable) el iPhone muestra "¿Confiar en esta
+computadora?" y pide el código de desbloqueo. Después de eso no se pide nada más.
+
+Wi-Fi: con el iPhone conectado por cable, `set_wifi(True)` activa lo mismo que la casilla
+«Mostrar este iPhone cuando esté en Wi-Fi» de Finder. Desde entonces, en la misma red,
+el iPhone aparece también por Wi-Fi (fotos y mensajes; la pantalla sólo va por cable).
+Si está por las dos vías, se usa el cable.
 """
 
 import asyncio
@@ -76,28 +81,47 @@ class IOSAdapter(DeviceAdapter):
     def _lock(self, udid: str) -> asyncio.Lock:
         return self._locks.setdefault(udid, asyncio.Lock())
 
-    async def _lockdown(self, udid: str):
+    @staticmethod
+    async def _connection_type(udid: str) -> str | None:
+        """"USB" si está por cable, "Network" si sólo por Wi-Fi, None si no se ve."""
+        try:
+            found = {m.connection_type for m in await usbmux_list() if m.matches_udid(udid)}
+        except (ConnectionFailedToUsbmuxdError, OSError):
+            return None
+        return "USB" if "USB" in found else ("Network" if "Network" in found else None)
+
+    async def _lockdown(self, udid: str, connection_type: str | None = None):
+        connection_type = connection_type or await self._connection_type(udid)
+        if connection_type is None:
+            raise DeviceError("No encuentro el iPhone. Conéctalo por cable o ponlo en la misma red Wi-Fi.")
         try:
             return await create_using_usbmux(
-                serial=udid, connection_type="USB", autopair=True, pair_timeout=PAIR_TIMEOUT
+                serial=udid, connection_type=connection_type,
+                # Emparejar («Confiar») sólo se puede por cable.
+                autopair=connection_type == "USB", pair_timeout=PAIR_TIMEOUT,
             )
         except PairingError as exc:
             raise DeviceError(_pairing_message(exc)) from exc
         except (ConnectionFailedToUsbmuxdError, PyMobileDevice3Exception, OSError) as exc:
-            raise DeviceError(f"El iPhone no responde. ¿Está conectado por cable? ({exc})") from exc
+            how = "por cable" if connection_type == "USB" else "por Wi-Fi"
+            raise DeviceError(f"El iPhone no responde {how}. ({exc})") from exc
 
     async def list_devices(self) -> list[Device]:
         try:
             mux_devices = await usbmux_list()
         except (ConnectionFailedToUsbmuxdError, OSError):
             return []
-        devices = []
+        # Un iPhone por cable y por Wi-Fi aparece dos veces: lo agrupamos y preferimos el cable.
+        by_udid: dict[str, set[str]] = {}
         for mux in mux_devices:
-            if not mux.is_usb:
-                continue
-            device = Device(id=mux.serial, kind="ios", name="iPhone")
+            by_udid.setdefault(mux.serial, set()).add(mux.connection_type)
+        devices = []
+        for udid, types in by_udid.items():
+            connection_type = "USB" if "USB" in types else "Network"
+            device = Device(id=udid, kind="ios", name="iPhone",
+                            connection="usb" if connection_type == "USB" else "wifi")
             try:
-                lockdown = await self._lockdown(mux.serial)
+                lockdown = await self._lockdown(udid, connection_type)
             except DeviceError as exc:
                 device.status = str(exc)
                 devices.append(device)
@@ -107,11 +131,27 @@ class IOSAdapter(DeviceAdapter):
                 device.name = info.get("DeviceName") or "iPhone"
                 device.model = lockdown.display_name or info.get("ProductType") or ""
                 device.os_version = f"iOS {info.get('ProductVersion') or ''}".strip()
-                device.capabilities = ["browse", "screen", "messages"]
+                device.wifi_enabled = (
+                    True if connection_type == "Network" else await lockdown.get_enable_wifi_connections())
+                # La pantalla sólo se puede ver por cable (macOS no la recibe por Wi-Fi).
+                device.capabilities = ["browse", "messages"] + (["screen"] if connection_type == "USB" else [])
+            except PyMobileDevice3Exception:
+                device.capabilities = device.capabilities or ["browse", "messages"]
             finally:
                 await lockdown.close()
             devices.append(device)
         return devices
+
+    async def set_wifi(self, device_id: str, on: bool) -> None:
+        if await self._connection_type(device_id) != "USB":
+            raise DeviceError("Para cambiar esto conecta el iPhone por cable.")
+        lockdown = await self._lockdown(device_id, "USB")
+        try:
+            await lockdown.set_enable_wifi_connections(on)
+        except PyMobileDevice3Exception as exc:
+            raise DeviceError(f"El iPhone no aceptó el cambio: {exc}") from exc
+        finally:
+            await lockdown.close()
 
     # ---------- Fotos (se ven directo del teléfono; sólo se copian las que elijas) ----------
 

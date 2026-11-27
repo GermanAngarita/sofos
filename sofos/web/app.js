@@ -49,7 +49,9 @@ async function loadDevices() {
   const icons = { ios: "", android: "🤖", mac: "💻" };
   for (const d of state.devices) {
     const li = el("li", "device" + (state.current?.key === d.key ? " active" : ""));
-    li.append(el("div", null, `${icons[d.kind] || ""} ${d.name}`));
+    const title = el("div", null, `${icons[d.kind] || ""} ${d.name}`);
+    if (d.connection) title.append(el("span", "conn", CONNECTION_LABEL[d.connection]));
+    li.append(title);
     li.append(el("div", "muted", [d.model, d.os_version].filter(Boolean).join(" · ")));
     if (d.status !== "ok") li.append(el("div", "warn", d.status));
     li.onclick = () => selectDevice(d.key);
@@ -57,9 +59,64 @@ async function loadDevices() {
   }
   if (state.current) {
     const updated = state.devices.find((d) => d.key === state.current.key);
-    if (updated) state.current = updated;
+    if (updated) {
+      const before = state.current;
+      state.current = updated;
+      // Se desconectó el cable y sigue por Wi-Fi (o al revés): actualizar pestañas y encabezado.
+      if (before.connection !== updated.connection || before.wifi_enabled !== updated.wifi_enabled
+          || before.capabilities.join() !== updated.capabilities.join()) {
+        refreshDeviceHeader();
+        if (before.capabilities.join() !== updated.capabilities.join()) applyTabs(false);
+      }
+    }
   }
 }
+
+const CONNECTION_LABEL = { usb: "🔌 cable", wifi: "📶 Wi-Fi" };
+
+function refreshDeviceHeader() {
+  const d = state.current;
+  $("#device-name").textContent = d.name;
+  const via = { usb: "conectado por cable", wifi: "conectado por Wi-Fi · la pantalla sólo se ve por cable" }[d.connection];
+  $("#device-info").textContent = [d.model, d.os_version, via].filter(Boolean).join(" · ");
+  const btn = $("#wifi-toggle");
+  // Sólo se puede activar/desactivar con el cable puesto.
+  btn.hidden = d.kind !== "ios" || d.connection !== "usb" || d.wifi_enabled === null;
+  btn.classList.toggle("on", !!d.wifi_enabled);
+  btn.textContent = d.wifi_enabled ? "📶 Wi-Fi activado" : "📶 Usar también por Wi-Fi";
+  btn.title = d.wifi_enabled
+    ? "En la misma red Wi-Fi, este iPhone aparece aunque desconectes el cable. Clic para desactivarlo."
+    : "Permite usar este iPhone por Wi-Fi (fotos y mensajes) cuando esté en la misma red que esta Mac.";
+}
+
+// Pestañas según lo que el dispositivo puede hacer ahora. `restart`: volver a cargar la pestaña.
+function applyTabs(restart = true) {
+  const d = state.current;
+  // "browse" (ver en el teléfono y elegir) o "photos" (copiar todo) habilitan la pestaña Fotos.
+  const caps = d.capabilities.map((c) => (c === "browse" ? "photos" : c));
+  document.querySelectorAll("#main-tabs button").forEach((b) => (b.hidden = !caps.includes(b.dataset.tab)));
+  const tab = caps.includes(state.tab) ? state.tab : caps[0];
+  if (!tab) { document.querySelectorAll(".tab").forEach((t) => (t.hidden = true)); return; }
+  if (restart || tab !== state.tab) switchTab(tab);
+}
+
+$("#wifi-toggle").onclick = async () => {
+  const d = state.current, on = !d.wifi_enabled;
+  const btn = $("#wifi-toggle");
+  btn.disabled = true;
+  try {
+    await getJSON(api(d.key, "/wifi"), {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on }),
+    });
+    d.wifi_enabled = on;
+    refreshDeviceHeader();
+    showStatus(on ? "Listo: en la misma red Wi-Fi podrás usar este iPhone sin cable (fotos y mensajes)." : "", false);
+  } catch (e) {
+    showStatus(e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+};
 
 function selectDevice(key) {
   stopScreen();
@@ -67,19 +124,12 @@ function selectDevice(key) {
   const d = state.current;
   $("#empty").hidden = true;
   $("#device-view").hidden = false;
-  $("#device-name").textContent = d.name;
-  $("#device-info").textContent = [d.model, d.os_version].filter(Boolean).join(" · ");
+  refreshDeviceHeader();
   document.querySelectorAll("#devices li.device").forEach((li, i) =>
     li.classList.toggle("active", state.devices[i]?.key === key));
-
-  // "browse" (ver en el teléfono y elegir) o "photos" (copiar todo) habilitan la pestaña Fotos.
-  const caps = d.capabilities.map((c) => (c === "browse" ? "photos" : c));
-  document.querySelectorAll("#main-tabs button").forEach((b) => (b.hidden = !caps.includes(b.dataset.tab)));
   showStatus(d.status !== "ok" ? d.status : "", false);
-  const tab = caps.includes(state.tab) ? state.tab : caps[0];
   state.convId = null;
-  if (tab) switchTab(tab);
-  else document.querySelectorAll(".tab").forEach((t) => (t.hidden = true));
+  applyTabs();
   if (d.job?.running) watchJob();
 }
 

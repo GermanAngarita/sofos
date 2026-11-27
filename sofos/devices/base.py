@@ -36,6 +36,10 @@ class DeviceAdapter(ABC):
         """Copia cada foto (ruta en el teléfono → archivo local). Llama on_progress(bytes) por cada una."""
         raise DeviceError("Esta fuente no permite elegir fotos para copiar.")
 
+    async def set_wifi(self, device_id: str, on: bool) -> None:
+        """Permite (o no) que esta Mac se conecte al teléfono por Wi-Fi."""
+        raise DeviceError("Esta fuente no admite conexión por Wi-Fi.")
+
     async def refresh_messages(self, device_id: str) -> None:
         """Trae una copia fresca de los mensajes del dispositivo (si aplica)."""
 

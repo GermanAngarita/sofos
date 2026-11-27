@@ -41,6 +41,12 @@ def create_app(manager: DeviceManager | None = None) -> FastAPI:
     async def devices():
         return await mgr.list_devices()
 
+    @app.post("/api/devices/{key}/wifi")
+    async def set_wifi(key: str, on: bool = Body(..., embed=True)):
+        adapter, device_id = mgr.resolve(key)
+        await adapter.set_wifi(device_id, on)
+        return {"wifi_enabled": on}
+
     @app.get("/api/devices/{key}/job")
     async def job(key: str):
         return mgr.job_dict(key)
